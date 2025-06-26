@@ -1,2 +1,4 @@
 __pycache__/principia.cpython-311.pyc
 /__pycache__
+/dist
+/src/principia.egg-info
