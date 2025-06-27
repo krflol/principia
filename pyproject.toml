@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "principia"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   { name="Keenan Finkelstein", email="keenanfinkelstein@gmail.com" },
 ]
@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "pandas",
     "statsmodels",
+    "requests",
 ]
 
 [project.urls]

@@ -219,6 +219,10 @@ def conform_to(protocol_class: type) -> Callable[[Any], bool]:
 def have_attribute(attr_name: str) -> Callable[[Any], bool]:
     return lambda v: hasattr(v, attr_name)
 
+def be_callable() -> Callable[[Any], bool]:
+    """Checks if a value is callable (e.g., a function or method)."""
+    return lambda v: callable(v)
+
 # --- Identity Checks ---
 def be_the_same_as(identity: Any) -> Callable[[Any], bool]:
     """Checks if a value is the exact same object as another (using 'is')."""
