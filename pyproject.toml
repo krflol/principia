@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "principia"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
   { name="Keenan Finkelstein", email="keenanfinkelstein@gmail.com" },
 ]
@@ -23,8 +23,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/pypa/sampleproject"
-"Bug Tracker" = "https://github.com/pypa/sampleproject/issues"
+"Homepage" = "https://github.com/krflol/principia"
 
 [tool.setuptools.packages.find]
 where = ["src"]

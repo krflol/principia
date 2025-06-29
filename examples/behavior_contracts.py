@@ -7,9 +7,7 @@ but the *behavior* of dependencies (like functions or objects) passed into
 your code.
 """
 
-import sys
-sys.path.append('..') # Add parent directory to path to import Principia
-from src.principia import principia
+from principia import AssumptionContract, AssuranceMatcher, contract, InvalidArgumentError, PreconditionError, be_callable
 
 # --- 1. Define Behavioral Check Functions ---
 
@@ -38,11 +36,11 @@ def is_safe_notifier(notifier_func):
 
 # This contract ensures that any function passed as the 'notifier' argument
 # adheres to the behavior defined in `is_safe_notifier`.
-BEHAVIORAL_CONTRACT = principia.AssumptionContract(
+BEHAVIORAL_CONTRACT = AssumptionContract(
     preconditions={
-        'notifier': principia.AssuranceMatcher(None, name="Notifier Function")
-            .must(principia.be_callable(), principia.PreconditionError, "{name} must be a callable function.")
-            .must(is_safe_notifier, principia.InvalidArgumentError, "{name} failed its safety check. It must not raise exceptions and must return True.")
+        'notifier': AssuranceMatcher(None, name="Notifier Function")
+            .must(be_callable(), PreconditionError, "{name} must be a callable function.")
+            .must(is_safe_notifier, InvalidArgumentError, "{name} failed its safety check. It must not raise exceptions and must return True.")
     },
     on_success="[Principia] ✅ Behavioral contract for notifier passed."
 )
@@ -50,7 +48,7 @@ BEHAVIORAL_CONTRACT = principia.AssumptionContract(
 
 # --- 3. Define the Business Logic with the Contract ---
 
-@principia.contract(BEHAVIORAL_CONTRACT)
+@contract(BEHAVIORAL_CONTRACT)
 def process_critical_data(data: dict, notifier):
     """
     Processes critical data and notifies a system of the outcome.
@@ -87,20 +85,11 @@ def bad_notifier_returns_wrong_value(message: str):
 # --- 5. Execute and Observe ---
 
 if __name__ == "__main__":
-    print("--- 1. Testing with a well-behaved (compliant) notifier ---")
-    try:
-        process_critical_data({"value": 42}, notifier=good_notifier)
-    except principia.PrincipiaError as e:
-        print(f"--> This should not happen. Caught error: {e}")
+    print("--- Testing with a well-behaved (compliant) notifier ---")
+    process_critical_data({"value": 42}, notifier=good_notifier)
 
-    print("\n--- 2. Testing with a notifier that crashes ---")
-    try:
-        process_critical_data({"value": 99}, notifier=bad_notifier_crashes)
-    except principia.InvalidArgumentError as e:
-        print(f"--> Caught expected error: {e}")
-
-    print("\n--- 3. Testing with a notifier that returns an incorrect value ---")
-    try:
-        process_critical_data({"value": 101}, notifier=bad_notifier_returns_wrong_value)
-    except principia.InvalidArgumentError as e:
-        print(f"--> Caught expected error: {e}")
+    print("\n--- Demonstrating contract failure (for documentation) ---")
+    print("If you were to run `process_critical_data` with a misbehaving notifier,")
+    print("Principia would raise an `InvalidArgumentError` before the core logic runs.")
+    # Example of what would fail:
+    # process_critical_data({"value": 99}, notifier=bad_notifier_crashes)
