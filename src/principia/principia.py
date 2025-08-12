@@ -97,9 +97,8 @@ class AssuranceMatcher:
         Defines an arm that requires a condition to be TRUE for success.
         This is the preferred, readable way to build contracts.
         """
-        # Invert the success condition to create the internal failure condition.
-        failure_condition = lambda v: not success_condition(v)
-        self._arms.append((failure_condition, then_raise, message))
+        # Store as a success condition.
+        self._arms.append((True, success_condition, then_raise, message))
         return self
 
     def on(
@@ -112,21 +111,54 @@ class AssuranceMatcher:
         Defines an arm based on a condition that returns TRUE for failure.
         Useful for low-level or inverted logic checks.
         """
-        self._arms.append((failure_condition, then_raise, message))
+        # Store as a failure condition.
+        self._arms.append((False, failure_condition, then_raise, message))
         return self
 
     def check(self) -> Any:
         """
-        Executes the validation, raising the first matching consequence.
+        Executes synchronous validation, raising the first matching consequence.
         Returns the original value if all checks pass.
         """
-        for condition_func, error_cls, msg_template in self._arms:
+        for is_success, condition_func, error_cls, msg_template in self._arms:
+            if inspect.iscoroutinefunction(condition_func):
+                raise PrincipiaError(
+                    f"Asynchronous condition '{condition_func.__name__}' cannot be "
+                    f"used in a synchronous contract. Use an async function context."
+                )
+
             is_failure_match = False
             try:
-                # A failure occurs if the failure condition returns True.
-                # If the check itself raises an exception (e.g., TypeError during
-                # a comparison), we treat that as a failure of the check itself.
-                is_failure_match = condition_func(self._value)
+                result = condition_func(self._value)
+                # A success condition fails if it returns False.
+                # A failure condition fails if it returns True.
+                is_failure_match = not result if is_success else result
+            except Exception:
+                is_failure_match = True
+
+            if is_failure_match:
+                formatted_message = msg_template.format(
+                    value=repr(self._value),
+                    name=self._name
+                )
+                raise error_cls(formatted_message)
+        return self._value
+
+    async def check_async(self) -> Any:
+        """
+        Executes synchronous or asynchronous validation, raising the first
+        matching consequence. Returns the original value if all checks pass.
+        """
+        for is_success, condition_func, error_cls, msg_template in self._arms:
+            is_failure_match = False
+            try:
+                result = condition_func(self._value)
+                if inspect.iscoroutine(result):
+                    result = await result
+
+                # A success condition fails if it returns False.
+                # A failure condition fails if it returns True.
+                is_failure_match = not result if is_success else result
             except Exception:
                 is_failure_match = True
 
@@ -152,52 +184,82 @@ def contract(*contracts: AssumptionContract):
     """
     A decorator that applies one or more AssumptionContracts to a function,
     wrapping it in a full validation lifecycle (environment, preconditions,
-    postconditions).
+    postconditions). Supports both synchronous and asynchronous functions.
     """
     def decorator(func):
+        sig = inspect.signature(func)
+
+        # Create a synchronous wrapper for regular functions.
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            sig = inspect.signature(func)
+        def sync_wrapper(*args, **kwargs):
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()
 
-            all_checks_passed = True
             for c in contracts:
-                try:
-                    if c.environment:
-                        c.environment.check()
-
-                    for arg_name, matcher_template in c.preconditions.items():
-                        if arg_name in bound_args.arguments:
-                            arg_value = bound_args.arguments[arg_name]
-                            actual_matcher = matcher_template.__class__(arg_value, name=arg_name)
-                            actual_matcher._arms = matcher_template._arms
-                            actual_matcher.check()
-                except Exception:
-                    all_checks_passed = False
-                    raise
+                if c.environment:
+                    c.environment.check()
+                for name, template in c.preconditions.items():
+                    if name in bound_args.arguments:
+                        val = bound_args.arguments[name]
+                        matcher = template.__class__(val, name=name)
+                        matcher._arms = template._arms
+                        matcher.check()
 
             result = func(*args, **kwargs)
 
             for c in contracts:
-                try:
-                    if c.postcondition:
-                        post_matcher = c.postcondition.__class__(result, name="ReturnValue")
-                        post_matcher._arms = c.postcondition._arms
-                        post_matcher.check()
-                except Exception:
-                    all_checks_passed = False
-                    raise
+                if c.postcondition:
+                    post_matcher = c.postcondition.__class__(result, name="ReturnValue")
+                    post_matcher._arms = c.postcondition._arms
+                    post_matcher.check()
 
-            if all_checks_passed:
-                for c in contracts:
-                    if c.on_success:
-                        if isinstance(c.on_success, str):
-                            print(c.on_success)
-                        elif callable(c.on_success):
-                            c.on_success()
+            # Execute on_success callbacks only if all checks passed.
+            for c in contracts:
+                if c.on_success:
+                    if isinstance(c.on_success, str):
+                        print(c.on_success)
+                    elif callable(c.on_success):
+                        c.on_success()
             return result
-        return wrapper
+
+        # Create an asynchronous wrapper for coroutine functions.
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            bound_args = sig.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            for c in contracts:
+                if c.environment:
+                    await c.environment.check_async()
+                for name, template in c.preconditions.items():
+                    if name in bound_args.arguments:
+                        val = bound_args.arguments[name]
+                        matcher = template.__class__(val, name=name)
+                        matcher._arms = template._arms
+                        await matcher.check_async()
+
+            result = await func(*args, **kwargs)
+
+            for c in contracts:
+                if c.postcondition:
+                    post_matcher = c.postcondition.__class__(result, name="ReturnValue")
+                    post_matcher._arms = c.postcondition._arms
+                    await post_matcher.check_async()
+
+            # Execute on_success callbacks.
+            for c in contracts:
+                if c.on_success:
+                    # Note: on_success handlers are assumed to be synchronous for now.
+                    if isinstance(c.on_success, str):
+                        print(c.on_success)
+                    elif callable(c.on_success):
+                        c.on_success()
+            return result
+
+        # Return the appropriate wrapper based on the function type.
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper
+        return sync_wrapper
     return decorator
 
 
